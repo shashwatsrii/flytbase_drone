@@ -1,0 +1,10 @@
+/* Ensure Leaflet map container has proper height */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Fix for leaflet-draw toolbar */
+.leaflet-draw-toolbar {
+  margin-top: 0;
+}

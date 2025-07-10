@@ -1,0 +1,42 @@
+# Server Configuration
+server:
+  port: 8080
+
+# Spring Configuration
+spring:
+  # Database Configuration
+  datasource:
+    url: jdbc:postgresql://localhost:5432/drone_survey_db
+    username: shashwatsrii
+    password: 
+    driver-class-name: org.postgresql.Driver
+  
+  # JPA Configuration
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  # Jackson Configuration
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+# JWT Configuration
+app:
+  jwt:
+    # Secret key for signing JWT tokens (should be at least 256 bits)
+    secret: 5367566B59703373367639792F423F4528482B4D6251655468576D5A71347437
+    # Token expiration time in milliseconds (1 day)
+    expirationMs: 86400000
+
+# Logging Configuration
+logging:
+  level:
+    org.springframework.web: INFO
+    org.hibernate: INFO
+    com.flytbase.drone: DEBUG

@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Production
+/build
+/dist
+
+# Misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Java/Maven
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.logs
+.mvn/
+mvnw
+mvnw.cmd
+
+# Spring Boot
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# Database
+*.db
+*.sqlite
+
+# OS
+Thumbs.db
+
+# Frontend specific
+frontend/node_modules/
+frontend/build/
+frontend/.env.local
