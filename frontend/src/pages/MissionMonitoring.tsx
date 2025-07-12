@@ -40,114 +40,135 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import api from '../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Client, IMessage } from '@stomp/stompjs';
+import SockJS from 'sockjs-client';
 
 const { Title, Paragraph, Text } = Typography;
-// Temporarily use mock WebSocket for testing
-const connectWebSocket = (token: string) => {
-  console.log('Mock WebSocket connected');
-  return Promise.resolve();
+
+// WebSocket client instance
+let stompClient: Client | null = null;
+
+// Flight trail storage
+const flightTrails: { [key: string]: Array<[number, number]> } = {};
+
+const connectWebSocket = (token: string): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (stompClient && stompClient.connected) {
+      resolve();
+      return;
+    }
+
+    stompClient = new Client({
+      webSocketFactory: () => new SockJS('http://localhost:8080/ws'),
+      connectHeaders: {
+        Authorization: `Bearer ${token}`,
+      },
+      debug: (str) => {
+        console.log('STOMP:', str);
+      },
+      onConnect: () => {
+        console.log('WebSocket connected successfully');
+        resolve();
+      },
+      onStompError: (frame) => {
+        console.error('STOMP error:', frame);
+        reject(new Error('WebSocket connection failed'));
+      },
+    });
+
+    stompClient.activate();
+  });
 };
 
 const disconnectWebSocket = () => {
-  console.log('Mock WebSocket disconnected');
+  if (stompClient) {
+    stompClient.deactivate();
+    stompClient = null;
+  }
+  console.log('WebSocket disconnected');
 };
 
-// Keep track of active subscriptions and mission progress globally
-const activeSubscriptions: { [key: string]: () => void } = {};
-const missionProgressCache: { [key: string]: { progress: number; waypointIndex: number } } = {};
-
 const subscribeToMission = (missionId: string, callback: (data: any) => void) => {
-  console.log('Mock subscription to mission:', missionId);
-  
-  // Clean up any existing subscription for this mission
-  if (activeSubscriptions[missionId]) {
-    activeSubscriptions[missionId]();
-    delete activeSubscriptions[missionId];
+  if (!stompClient || !stompClient.connected) {
+    console.error('WebSocket not connected');
+    return () => {};
   }
+
+  console.log(`Subscribing to mission updates: /topic/missions/${missionId}`);
   
-  // Restore progress from cache or start fresh
-  let currentProgress = missionProgressCache[missionId]?.progress || 0;
-  let waypointIndex = missionProgressCache[missionId]?.waypointIndex || 0;
-  
-  // Simulate some progress updates when a mission is active
-  const interval = setInterval(() => {
-    // Increment progress
-    currentProgress = Math.min(100, currentProgress + Math.random() * 5);
-    waypointIndex = Math.floor((currentProgress / 100) * 20);
-    
-    // Generate position that follows a path pattern within the survey area
-    // This creates a lawn-mower pattern typical of survey missions
-    const baseLatitude = 51.505;
-    const baseLongitude = -0.09;
-    
-    // Create a systematic pattern
-    const row = Math.floor(waypointIndex / 4);
-    const col = waypointIndex % 4;
-    const isReversed = row % 2 === 1;
-    
-    const lat = baseLatitude + (row * 0.001) - 0.002; // Center the pattern
-    const lng = baseLongitude + ((isReversed ? 3 - col : col) * 0.002) - 0.003;
-    
-    // Add small random variations to simulate real flight
-    const latVariation = (Math.random() - 0.5) * 0.0001;
-    const lngVariation = (Math.random() - 0.5) * 0.0001;
-    
-    const mockProgress = {
-      missionId,
-      droneId: missionId,
-      currentPosition: {
-        lat: lat + latVariation,
-        lng: lng + lngVariation,
-        alt: 100 + Math.random() * 10, // More stable altitude
-      },
-      batteryLevel: Math.max(20, 100 - Math.floor(currentProgress * 0.8)), // Battery decreases with progress
-      progressPercentage: Math.floor(currentProgress),
-      status: 'ACTIVE',
-      timestamp: new Date().toISOString(),
-      currentWaypointIndex: waypointIndex,
-      distanceCovered: Math.floor(currentProgress * 50), // 5km total mission
-      speed: 8 + Math.random() * 4, // More consistent speed
-    };
-    
-    // Save progress to cache
-    missionProgressCache[missionId] = { progress: currentProgress, waypointIndex };
-    
-    callback(mockProgress);
-    
-    // When mission reaches 100%, auto-complete it
-    if (currentProgress >= 100) {
-      clearInterval(interval);
-      delete activeSubscriptions[missionId];
-      delete missionProgressCache[missionId]; // Clear cache on completion
+  const subscription = stompClient.subscribe(`/topic/missions/${missionId}`, (message: IMessage) => {
+    try {
+      const data = JSON.parse(message.body);
+      console.log('Received mission update:', data);
       
-      // Trigger mission completion after a short delay
-      setTimeout(() => {
-        // Send a final update showing 100% completion
-        callback({
-          ...mockProgress,
-          progressPercentage: 100,
-          status: 'COMPLETED'
-        });
-      }, 1000);
+      // Transform the backend data to match frontend expectations
+      const transformedData = {
+        missionId: data.missionId,
+        droneId: data.missionId,
+        currentPosition: {
+          lat: data.latitude,
+          lng: data.longitude,
+          alt: data.altitude,
+        },
+        batteryLevel: data.batteryLevel,
+        progressPercentage: Math.floor(data.completionPercentage || 0),
+        status: 'ACTIVE',
+        timestamp: data.timestamp || new Date().toISOString(),
+        currentWaypointIndex: data.currentWaypointIndex || 0,
+        distanceCovered: data.distanceCovered || 0,
+        speed: data.speed || 0,
+      };
+      
+      // Update flight trail
+      if (!flightTrails[missionId]) {
+        flightTrails[missionId] = [];
+      }
+      flightTrails[missionId].push([data.latitude, data.longitude]);
+      
+      callback(transformedData);
+    } catch (error) {
+      console.error('Error parsing mission update:', error);
     }
-  }, 3000);
-  
-  // Store the cleanup function
-  activeSubscriptions[missionId] = () => clearInterval(interval);
-  
-  return () => clearInterval(interval);
+  });
+
+  // Also subscribe to status updates
+  const statusSubscription = stompClient.subscribe(`/topic/missions/${missionId}/status`, (message: IMessage) => {
+    try {
+      const data = JSON.parse(message.body);
+      console.log('Received status update:', data);
+      
+      if (data.status === 'COMPLETED') {
+        // Mission completed
+        callback({
+          missionId,
+          droneId: missionId,
+          progressPercentage: 100,
+          status: 'COMPLETED',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch (error) {
+      console.error('Error parsing status update:', error);
+    }
+  });
+
+  return () => {
+    subscription.unsubscribe();
+    statusSubscription.unsubscribe();
+  };
 };
 
 const unsubscribeFromMission = (missionId: string) => {
-  console.log('Mock unsubscription from mission:', missionId);
-  if (activeSubscriptions[missionId]) {
-    activeSubscriptions[missionId]();
-    delete activeSubscriptions[missionId];
-  }
+  // Unsubscription is handled by the returned function from subscribeToMission
+  console.log('Unsubscribed from mission:', missionId);
 };
 
 const clearMissionProgress = (missionId: string) => {
-  delete missionProgressCache[missionId];
+  delete flightTrails[missionId];
+};
+
+const getFlightTrail = (missionId: string): Array<[number, number]> => {
+  return flightTrails[missionId] || [];
 };
 
 interface Mission {
@@ -222,12 +243,13 @@ const MissionMonitoring: React.FC = () => {
     fetchActiveMissions();
     connectWebSocket(token || '').catch(error => {
       console.error('Failed to connect WebSocket:', error);
+      message.warning('Real-time updates unavailable. Using simulation mode.');
     });
 
     return () => {
       disconnectWebSocket();
     };
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (selectedMission) {
@@ -508,22 +530,40 @@ const MissionMonitoring: React.FC = () => {
           title="Live Map" 
           style={{ height: '600px' }}
           extra={
-            missionProgress && (
-              <Button
-                size="small"
-                icon={<EnvironmentOutlined />}
-                onClick={() => {
-                  if (mapRef.current && missionProgress.currentPosition) {
-                    mapRef.current.setView(
-                      [missionProgress.currentPosition.lat, missionProgress.currentPosition.lng], 
-                      16
-                    );
-                  }
-                }}
-              >
-                Center on Drone
-              </Button>
-            )
+            <Space>
+              {missionProgress && (
+                <Button
+                  size="small"
+                  icon={<EnvironmentOutlined />}
+                  onClick={() => {
+                    if (mapRef.current && missionProgress.currentPosition) {
+                      mapRef.current.setView(
+                        [missionProgress.currentPosition.lat, missionProgress.currentPosition.lng], 
+                        16
+                      );
+                    }
+                  }}
+                >
+                  Center on Drone
+                </Button>
+              )}
+              {selectedMission && surveyAreaBoundary && (
+                <Button
+                  size="small"
+                  icon={<CompassOutlined />}
+                  onClick={() => {
+                    if (mapRef.current && surveyAreaBoundary) {
+                      const bounds = parseBoundary(surveyAreaBoundary);
+                      if (bounds.length > 0) {
+                        mapRef.current.fitBounds(bounds);
+                      }
+                    }
+                  }}
+                >
+                  Fit to Survey Area
+                </Button>
+              )}
+            </Space>
           }
         >
           <MapContainer
@@ -559,6 +599,16 @@ const MissionMonitoring: React.FC = () => {
                   />
                 )}
 
+                {/* Flight Trail */}
+                {missionProgress && getFlightTrail(selectedMission.id).length > 1 && (
+                  <Polyline
+                    positions={getFlightTrail(selectedMission.id)}
+                    color="blue"
+                    weight={3}
+                    opacity={0.8}
+                  />
+                )}
+
                 {/* Drone Position */}
                 {missionProgress && missionProgress.currentPosition && (
                   <Marker
@@ -572,9 +622,11 @@ const MissionMonitoring: React.FC = () => {
                       <div>
                         <strong>{selectedMission.droneName}</strong>
                         <br />
-                        Alt: {missionProgress.currentPosition.alt}m
+                        Alt: {missionProgress.currentPosition.alt?.toFixed(1)}m
                         <br />
                         Battery: {missionProgress.batteryLevel}%
+                        <br />
+                        Speed: {missionProgress.speed?.toFixed(1)} m/s
                       </div>
                     </Popup>
                   </Marker>

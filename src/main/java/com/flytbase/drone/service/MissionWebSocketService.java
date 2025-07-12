@@ -1,21 +1,40 @@
 package com.flytbase.drone.service;
 
 import com.flytbase.drone.dto.mission.MissionProgressResponse;
+import com.flytbase.drone.entity.FlightPath;
+import com.flytbase.drone.entity.Mission;
+import com.flytbase.drone.repository.FlightPathRepository;
+import com.flytbase.drone.repository.MissionRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 /** Service for handling WebSocket communication for mission monitoring. */
 @Service
+@Slf4j
 public class MissionWebSocketService {
 
   private final SimpMessagingTemplate messagingTemplate;
+  private final MissionRepository missionRepository;
+  private final FlightPathRepository flightPathRepository;
+  private final ObjectMapper objectMapper;
 
   @Autowired
-  public MissionWebSocketService(SimpMessagingTemplate messagingTemplate) {
+  public MissionWebSocketService(
+      SimpMessagingTemplate messagingTemplate,
+      MissionRepository missionRepository,
+      FlightPathRepository flightPathRepository) {
     this.messagingTemplate = messagingTemplate;
+    this.missionRepository = missionRepository;
+    this.flightPathRepository = flightPathRepository;
+    this.objectMapper = new ObjectMapper();
   }
 
   /**
@@ -49,53 +68,91 @@ public class MissionWebSocketService {
    * Simulate drone movement for testing purposes.
    *
    * @param missionId the mission ID
-   * @param waypointCount the total number of waypoints
+   * @param waypointCount the total number of waypoints (ignored, uses actual waypoints)
    */
   public void simulateDroneMovement(UUID missionId, int waypointCount) {
-    // This method is used for testing the real-time updates
-    // It simulates a drone moving through waypoints and sends updates
-
-    // Create a new thread to simulate movement
+    // This method simulates a drone moving through the actual mission waypoints
+    
     new Thread(
             () -> {
               try {
-                // Start with initial values
-                double startLat = 37.7749;
-                double startLon = -122.4194;
-                int altitude = 100;
-                double speed = 5.0;
+                // Get the mission and its flight path
+                Mission mission = missionRepository.findById(missionId).orElse(null);
+                if (mission == null) {
+                  log.error("Mission not found: {}", missionId);
+                  return;
+                }
+                
+                FlightPath flightPath = flightPathRepository.findByMissionId(missionId).orElse(null);
+                if (flightPath == null) {
+                  log.error("Flight path not found for mission: {}", missionId);
+                  return;
+                }
+                
+                // Parse waypoints from JSON string
+                List<Map<String, Double>> waypoints = null;
+                try {
+                  waypoints = objectMapper.readValue(
+                      flightPath.getWaypoints(), 
+                      new TypeReference<List<Map<String, Double>>>() {}
+                  );
+                } catch (Exception e) {
+                  log.error("Failed to parse waypoints: {}", e.getMessage());
+                  return;
+                }
+                
+                if (waypoints == null || waypoints.isEmpty()) {
+                  log.error("No waypoints found for mission: {}", missionId);
+                  return;
+                }
+                
+                log.info("Starting simulation for mission {} with {} waypoints", missionId, waypoints.size());
+                
+                // Initial values
+                double altitude = mission.getFlightAltitude();
+                double speed = mission.getFlightSpeed();
                 int batteryLevel = 100;
-
-                // Simulate movement through waypoints
-                for (int i = 0; i < waypointCount; i++) {
+                double totalWaypoints = waypoints.size();
+                
+                // Simulate movement through actual waypoints
+                for (int i = 0; i < waypoints.size(); i++) {
                   // Sleep to simulate time passing
                   Thread.sleep(2000);
-
-                  // Update position (simple simulation)
-                  double lat = startLat + (i * 0.0001);
-                  double lon = startLon + (i * 0.0001);
-
+                  
+                  // Get current waypoint
+                  Map<String, Double> waypoint = waypoints.get(i);
+                  double lat = waypoint.get("lat");
+                  double lng = waypoint.get("lng");
+                  double wpAlt = waypoint.getOrDefault("alt", altitude);
+                  
                   // Decrease battery level gradually
-                  batteryLevel = Math.max(0, batteryLevel - 1);
-
+                  batteryLevel = Math.max(20, 100 - (int)((i / totalWaypoints) * 80));
+                  
+                  // Add some realistic variations
+                  double actualSpeed = speed + (Math.random() - 0.5) * 2;
+                  double actualAlt = wpAlt + (Math.random() - 0.5) * 5;
+                  
                   // Create progress response
                   MissionProgressResponse response = new MissionProgressResponse();
                   response.setMissionId(missionId);
                   response.setCurrentWaypointIndex(i);
-                  response.setTotalWaypoints(waypointCount);
+                  response.setTotalWaypoints((int)totalWaypoints);
                   response.setLatitude(lat);
-                  response.setLongitude(lon);
-                  response.setAltitude(altitude);
-                  response.setSpeed(speed);
+                  response.setLongitude(lng);
+                  response.setAltitude(actualAlt);
+                  response.setSpeed(actualSpeed);
                   response.setBatteryLevel(batteryLevel);
-                  response.setCompletionPercentage((double) i / waypointCount * 100);
+                  response.setCompletionPercentage(((double)(i + 1) / totalWaypoints) * 100);
                   response.setTimestamp(LocalDateTime.now());
-
+                  
+                  log.debug("Broadcasting progress: waypoint {}/{}, lat: {}, lng: {}", 
+                      i + 1, waypoints.size(), lat, lng);
+                  
                   // Send update
                   broadcastProgressUpdate(missionId, response);
-
+                  
                   // If this is the last waypoint, send completion notification
-                  if (i == waypointCount - 1) {
+                  if (i == waypoints.size() - 1) {
                     sendStatusChangeNotification(
                         missionId, "COMPLETED", "Mission has been completed successfully");
                   }
@@ -103,6 +160,9 @@ public class MissionWebSocketService {
               } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 sendStatusChangeNotification(missionId, "ABORTED", "Simulation was interrupted");
+              } catch (Exception e) {
+                log.error("Error during simulation: {}", e.getMessage(), e);
+                sendStatusChangeNotification(missionId, "ABORTED", "Simulation error: " + e.getMessage());
               }
             })
         .start();
