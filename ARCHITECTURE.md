@@ -1,4 +1,54 @@
-# Architecture
+in# Architecture
+
+## Technologies Used
+
+### Backend
+- **Java 11** - Core programming language
+- **Spring Boot 2.6.3** - Application framework
+- **Spring Security** - Authentication and authorization
+- **Spring Data JPA** - Database ORM
+- **Spring WebSocket** - Real-time communication
+- **JWT (JSON Web Tokens)** - Stateless authentication
+- **Maven** - Build and dependency management
+- **Lombok** - Boilerplate code reduction
+- **PostgreSQL 12+** - Primary database with spatial support
+- **Flyway** - Database migration management
+- **Jackson** - JSON processing
+- **SLF4J + Logback** - Logging framework
+
+### Frontend
+- **React 18** - UI framework
+- **TypeScript** - Type-safe JavaScript
+- **Redux Toolkit** - State management
+- **React Router v6** - Client-side routing
+- **Material-UI (MUI) v5** - Component library
+- **Ant Design** - Additional UI components
+- **Leaflet** - Interactive maps
+- **React-Leaflet** - React wrapper for Leaflet
+- **Axios** - HTTP client
+- **STOMP.js** - WebSocket client
+- **Chart.js** - Data visualization
+- **React-Chartjs-2** - React wrapper for Chart.js
+- **date-fns** - Date utility library
+
+### Development & Build Tools
+- **Node.js 16+** - JavaScript runtime
+- **npm** - Package manager
+- **Create React App** - React build setup
+- **ESLint** - JavaScript linting
+- **Prettier** - Code formatting
+
+### Testing
+- **JUnit 5** - Java unit testing
+- **Mockito** - Java mocking framework
+- **Jest** - JavaScript testing (configured in CRA)
+- **React Testing Library** - React component testing
+
+### Infrastructure
+- **WebSocket (STOMP protocol)** - Real-time communication
+- **REST API** - Client-server communication
+- **JWT** - API authentication
+- **CORS** - Cross-origin resource sharing
 
 ## Overview
 
