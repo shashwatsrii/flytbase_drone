@@ -1,12 +1,12 @@
 package com.flytbase.drone.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flytbase.drone.dto.mission.MissionProgressResponse;
 import com.flytbase.drone.entity.FlightPath;
 import com.flytbase.drone.entity.Mission;
 import com.flytbase.drone.repository.FlightPathRepository;
 import com.flytbase.drone.repository.MissionRepository;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -72,7 +72,7 @@ public class MissionWebSocketService {
    */
   public void simulateDroneMovement(UUID missionId, int waypointCount) {
     // This method simulates a drone moving through the actual mission waypoints
-    
+
     new Thread(
             () -> {
               try {
@@ -82,75 +82,83 @@ public class MissionWebSocketService {
                   log.error("Mission not found: {}", missionId);
                   return;
                 }
-                
-                FlightPath flightPath = flightPathRepository.findByMissionId(missionId).orElse(null);
+
+                FlightPath flightPath =
+                    flightPathRepository.findByMissionId(missionId).orElse(null);
                 if (flightPath == null) {
                   log.error("Flight path not found for mission: {}", missionId);
                   return;
                 }
-                
+
                 // Parse waypoints from JSON string
                 List<Map<String, Double>> waypoints = null;
                 try {
-                  waypoints = objectMapper.readValue(
-                      flightPath.getWaypoints(), 
-                      new TypeReference<List<Map<String, Double>>>() {}
-                  );
+                  waypoints =
+                      objectMapper.readValue(
+                          flightPath.getWaypoints(),
+                          new TypeReference<List<Map<String, Double>>>() {});
                 } catch (Exception e) {
                   log.error("Failed to parse waypoints: {}", e.getMessage());
                   return;
                 }
-                
+
                 if (waypoints == null || waypoints.isEmpty()) {
                   log.error("No waypoints found for mission: {}", missionId);
                   return;
                 }
-                
-                log.info("Starting simulation for mission {} with {} waypoints", missionId, waypoints.size());
-                
+
+                log.info(
+                    "Starting simulation for mission {} with {} waypoints",
+                    missionId,
+                    waypoints.size());
+
                 // Initial values
                 double altitude = mission.getFlightAltitude();
-                double speed = mission.getFlightSpeed();
+                double speed = mission.getSpeed() != null ? mission.getSpeed() : 10.0;
                 int batteryLevel = 100;
                 double totalWaypoints = waypoints.size();
-                
+
                 // Simulate movement through actual waypoints
                 for (int i = 0; i < waypoints.size(); i++) {
                   // Sleep to simulate time passing
                   Thread.sleep(2000);
-                  
+
                   // Get current waypoint
                   Map<String, Double> waypoint = waypoints.get(i);
                   double lat = waypoint.get("lat");
                   double lng = waypoint.get("lng");
                   double wpAlt = waypoint.getOrDefault("alt", altitude);
-                  
+
                   // Decrease battery level gradually
-                  batteryLevel = Math.max(20, 100 - (int)((i / totalWaypoints) * 80));
-                  
+                  batteryLevel = Math.max(20, 100 - (int) ((i / totalWaypoints) * 80));
+
                   // Add some realistic variations
                   double actualSpeed = speed + (Math.random() - 0.5) * 2;
                   double actualAlt = wpAlt + (Math.random() - 0.5) * 5;
-                  
+
                   // Create progress response
                   MissionProgressResponse response = new MissionProgressResponse();
                   response.setMissionId(missionId);
                   response.setCurrentWaypointIndex(i);
-                  response.setTotalWaypoints((int)totalWaypoints);
+                  response.setTotalWaypoints((int) totalWaypoints);
                   response.setLatitude(lat);
                   response.setLongitude(lng);
-                  response.setAltitude(actualAlt);
+                  response.setAltitude((int) Math.round(actualAlt));
                   response.setSpeed(actualSpeed);
                   response.setBatteryLevel(batteryLevel);
-                  response.setCompletionPercentage(((double)(i + 1) / totalWaypoints) * 100);
+                  response.setCompletionPercentage(((double) (i + 1) / totalWaypoints) * 100);
                   response.setTimestamp(LocalDateTime.now());
-                  
-                  log.debug("Broadcasting progress: waypoint {}/{}, lat: {}, lng: {}", 
-                      i + 1, waypoints.size(), lat, lng);
-                  
+
+                  log.debug(
+                      "Broadcasting progress: waypoint {}/{}, lat: {}, lng: {}",
+                      i + 1,
+                      waypoints.size(),
+                      lat,
+                      lng);
+
                   // Send update
                   broadcastProgressUpdate(missionId, response);
-                  
+
                   // If this is the last waypoint, send completion notification
                   if (i == waypoints.size() - 1) {
                     sendStatusChangeNotification(
@@ -162,7 +170,8 @@ public class MissionWebSocketService {
                 sendStatusChangeNotification(missionId, "ABORTED", "Simulation was interrupted");
               } catch (Exception e) {
                 log.error("Error during simulation: {}", e.getMessage(), e);
-                sendStatusChangeNotification(missionId, "ABORTED", "Simulation error: " + e.getMessage());
+                sendStatusChangeNotification(
+                    missionId, "ABORTED", "Simulation error: " + e.getMessage());
               }
             })
         .start();
